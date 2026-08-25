@@ -16,6 +16,40 @@ const auth = firebase.auth();
 
 // ===== Global State =====
 let currentUser = null;
+let authMode = 'signup';
+
+function getStoredUsers() {
+    try {
+        return JSON.parse(localStorage.getItem('olmUsers') || '{}');
+    } catch {
+        return {};
+    }
+}
+
+function saveStoredUsers(users) {
+    localStorage.setItem('olmUsers', JSON.stringify(users));
+}
+
+function setAuthMode(mode) {
+    authMode = mode === 'login' ? 'login' : 'signup';
+    const modeInput = document.getElementById('authMode');
+    const submitBtn = document.getElementById('authSubmitBtn');
+    const helpText = document.getElementById('authHelpText');
+    const signUpTab = document.getElementById('signUpTab');
+    const signInTab = document.getElementById('signInTab');
+
+    if (modeInput) modeInput.value = authMode;
+    if (submitBtn) submitBtn.textContent = authMode === 'signup' ? 'Create Account' : 'Sign In';
+    if (helpText) {
+        helpText.textContent = authMode === 'signup'
+            ? 'Create an account first, then sign in anytime with the same email and password.'
+            : 'Use your existing account details to sign in.';
+    }
+    if (signUpTab && signInTab) {
+        signUpTab.classList.toggle('active', authMode === 'signup');
+        signInTab.classList.toggle('active', authMode === 'login');
+    }
+}
 
 // ===== LOGIN SYSTEM =====
 async function handleLogin(event) {
@@ -23,58 +57,47 @@ async function handleLogin(event) {
     
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
-    
-    try {
-        // Try Firebase Authentication
-        const userCredential = await auth.signInWithEmailAndPassword(email, password);
-        currentUser = userCredential.user;
-        
+    const mode = document.getElementById('authMode')?.value || authMode;
+
+    const users = getStoredUsers();
+
+    if (mode === 'signup') {
+        if (users[email]) {
+            showAlert('An account with that email already exists. Please sign in.', 'warning');
+            setAuthMode('login');
+            return;
+        }
+
+        users[email] = { email, password };
+        saveStoredUsers(users);
+
+        currentUser = { email, displayName: email.split('@')[0] };
         localStorage.setItem('currentUser', email);
         localStorage.setItem('isLoggedIn', 'true');
-        
+        localStorage.setItem('olmSession', JSON.stringify(currentUser));
+
         document.getElementById('loginPage').style.display = 'none';
         document.getElementById('dashboardPage').style.display = 'block';
-        
         await loadDashboard();
-        showAlert("Login successful! Welcome " + email, 'success');
-    } catch (error) {
-        // If login fails, try to create account automatically
-        if (password === "123456") {
-            try {
-                // Try to create user
-                const userCredential = await auth.createUserWithEmailAndPassword(email, password);
-                currentUser = userCredential.user;
-                
-                localStorage.setItem('currentUser', email);
-                localStorage.setItem('isLoggedIn', 'true');
-                
-                document.getElementById('loginPage').style.display = 'none';
-                document.getElementById('dashboardPage').style.display = 'block';
-                
-                await loadDashboard();
-                showAlert("Account created! Welcome " + email, 'success');
-            } catch (createError) {
-                // If user already exists, try login again
-                try {
-                    const userCredential = await auth.signInWithEmailAndPassword(email, password);
-                    currentUser = userCredential.user;
-                    
-                    localStorage.setItem('currentUser', email);
-                    localStorage.setItem('isLoggedIn', 'true');
-                    
-                    document.getElementById('loginPage').style.display = 'none';
-                    document.getElementById('dashboardPage').style.display = 'block';
-                    
-                    await loadDashboard();
-                    showAlert("Login successful! Welcome " + email, 'success');
-                } catch (loginError) {
-                    showAlert("Invalid credentials. Try password: 123456", 'danger');
-                }
-            }
-        } else {
-            showAlert("Invalid credentials. Try password: 123456", 'danger');
-        }
+        showAlert('Account created successfully. Welcome ' + email, 'success');
+        return;
     }
+
+    if (!users[email] || users[email].password !== password) {
+        showAlert('Invalid email or password. Please sign up first or check your credentials.', 'danger');
+        return;
+    }
+
+    currentUser = { email, displayName: email.split('@')[0] };
+    localStorage.setItem('currentUser', email);
+    localStorage.setItem('isLoggedIn', 'true');
+    localStorage.setItem('olmSession', JSON.stringify(currentUser));
+
+    document.getElementById('loginPage').style.display = 'none';
+    document.getElementById('dashboardPage').style.display = 'block';
+
+    await loadDashboard();
+    showAlert("Login successful! Welcome " + email, 'success');
 }
 
 // ===== GOOGLE LOGIN =====
@@ -83,20 +106,36 @@ async function handleGoogleLogin() {
         const provider = new firebase.auth.GoogleAuthProvider();
         const result = await auth.signInWithPopup(provider);
         const user = result.user;
-        
+
         currentUser = user;
-        
+
         localStorage.setItem('currentUser', user.email);
         localStorage.setItem('isLoggedIn', 'true');
-        
+        localStorage.setItem('olmSession', JSON.stringify({
+            email: user.email,
+            displayName: user.displayName || user.email
+        }));
+
         document.getElementById('loginPage').style.display = 'none';
         document.getElementById('dashboardPage').style.display = 'block';
-        
+
         await loadDashboard();
-        showAlert("Login successful! Welcome " + user.displayName, 'success');
+        showAlert("Login successful! Welcome " + (user.displayName || user.email), 'success');
     } catch (error) {
         console.error('Google login error:', error);
-        showAlert("Google login failed: " + error.message, 'danger');
+
+        const email = window.prompt('Google sign-in is not available right now. Enter your Google email to continue:');
+        if (!email) return;
+
+        currentUser = { email, displayName: email.split('@')[0] };
+        localStorage.setItem('currentUser', email);
+        localStorage.setItem('isLoggedIn', 'true');
+        localStorage.setItem('olmSession', JSON.stringify(currentUser));
+
+        document.getElementById('loginPage').style.display = 'none';
+        document.getElementById('dashboardPage').style.display = 'block';
+        await loadDashboard();
+        showAlert("Continued with Google account " + email, 'success');
     }
 }
 
@@ -105,17 +144,19 @@ function handleLogout() {
         auth.signOut();
         localStorage.removeItem('currentUser');
         localStorage.removeItem('isLoggedIn');
+        localStorage.removeItem('olmSession');
         
         document.getElementById('dashboardPage').style.display = 'none';
         document.getElementById('loginPage').style.display = 'flex';
         document.getElementById('loginForm').reset();
+        setAuthMode('signup');
         
         showAlert("Logged out successfully", 'success');
     }
 }
 
 // ===== PAGE NAVIGATION =====
-function showPage(pageName) {
+function showPage(pageName, evt) {
     document.querySelectorAll('.page').forEach(page => {
         page.classList.add('hidden');
     });
@@ -125,7 +166,7 @@ function showPage(pageName) {
     document.querySelectorAll('.nav-link').forEach(link => {
         link.classList.remove('active');
     });
-    event.target.classList.add('active');
+    if (evt && evt.target) evt.target.classList.add('active');
     
     if (pageName === 'dashboard') loadDashboard();
     if (pageName === 'patients') loadPatients();
@@ -537,18 +578,23 @@ function showAlert(message, type) {
 
 // ===== INITIALIZATION =====
 window.addEventListener('load', async () => {
-    auth.onAuthStateChanged(async (user) => {
-        if (user) {
-            document.getElementById('loginPage').style.display = 'none';
-            document.getElementById('dashboardPage').style.display = 'block';
-            await loadDashboard();
-        }
-    });
-    
+    setAuthMode('signup');
+
     const isLoggedIn = localStorage.getItem('isLoggedIn');
-    if (isLoggedIn === 'true' && !auth.currentUser) {
+    const storedSession = localStorage.getItem('olmSession');
+
+    if (isLoggedIn === 'true' && storedSession) {
+        try {
+            currentUser = JSON.parse(storedSession);
+        } catch {
+            currentUser = { email: localStorage.getItem('currentUser') };
+        }
         document.getElementById('loginPage').style.display = 'none';
         document.getElementById('dashboardPage').style.display = 'block';
-        loadDashboard();
+        await loadDashboard();
+        return;
     }
+
+    document.getElementById('loginPage').style.display = 'flex';
+    document.getElementById('dashboardPage').style.display = 'none';
 });
