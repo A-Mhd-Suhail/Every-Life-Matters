@@ -66,28 +66,28 @@ function normalizeAuthError(error) {
     const code = error?.code || '';
     switch (code) {
         case 'auth/email-already-in-use':
-            return 'User already exists. Please sign in instead.';
+            return '<strong>User already exists.</strong> Please sign in instead.';
         case 'auth/invalid-email':
-            return 'Please enter a valid email address.';
+            return '<strong>Invalid email.</strong> Please enter a valid email address.';
         case 'auth/weak-password':
-            return 'Password is too short. Firebase requires at least 6 characters.';
+            return '<strong>Password too short.</strong> Firebase requires at least 6 characters.';
         case 'auth/user-not-found':
         case 'auth/wrong-password':
         case 'auth/user-disabled':
         case 'auth/invalid-credential':
             return code === 'auth/user-not-found'
-                ? 'User does not exist. Please sign in first.'
-                : 'Password is incorrect. Please try again.';
+                ? '<strong>User does not exist.</strong> Please sign in first.'
+                : '<strong>Password is incorrect.</strong> Please try again.';
         case 'auth/popup-closed-by-user':
-            return 'Google sign-in was closed before it finished.';
+            return '<strong>Google sign-in closed.</strong> Please try again.';
         case 'auth/cancelled-popup-request':
-            return 'A Google sign-in request is already open.';
+            return '<strong>Google sign-in already open.</strong> Please finish the current request first.';
         case 'auth/unauthorized-domain':
-            return 'Google sign-in is not authorized on this domain yet. Add your GitHub Pages domain in Firebase Auth settings.';
+            return '<strong>Domain not authorized.</strong> Add your GitHub Pages domain in Firebase Auth settings.';
         case 'auth/network-request-failed':
-            return 'A network error occurred while contacting Firebase. Please try again.';
+            return '<strong>Network error.</strong> Please try again.';
         default:
-            return error?.message || 'Something went wrong with authentication.';
+            return error?.message || '<strong>Authentication failed.</strong> Please try again.';
     }
 }
 
@@ -218,7 +218,7 @@ async function handleLogin(event) {
         }
 
         if (!users[email] || users[email].password !== password) {
-            showAlert('Invalid email or password. Please check your credentials.', 'danger');
+            showAlert('<strong>Password is incorrect.</strong> Please try again.', 'danger');
             return;
         }
 
@@ -767,8 +767,11 @@ function submitForm() {
 // ===== ALERT SYSTEM =====
 function showAlert(message, type) {
     const alertDiv = document.getElementById('alert');
-    alertDiv.textContent = message;
+    alertDiv.innerHTML = message;
     alertDiv.className = `alert ${type} show`;
+    alertDiv.style.fontWeight = '700';
+    alertDiv.style.letterSpacing = '0.1px';
+    alertDiv.style.lineHeight = '1.45';
     
     setTimeout(() => {
         alertDiv.classList.remove('show');
