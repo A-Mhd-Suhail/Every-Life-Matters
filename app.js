@@ -12,6 +12,8 @@ const firebaseConfig = {
 // Initialize Firebase
 let db = null;
 let auth = null;
+let authReady = false;
+let authStateInitialized = false;
 
 if (window.firebase) {
     try {
@@ -53,6 +55,34 @@ function clearSession() {
     localStorage.removeItem('olmSession');
 }
 
+function getDisplayNameFromEmail(email) {
+    return (email || '').split('@')[0] || 'User';
+}
+
+function normalizeAuthError(error) {
+    const code = error?.code || '';
+    switch (code) {
+        case 'auth/email-already-in-use':
+            return 'An account with that email already exists. Please sign in instead.';
+        case 'auth/invalid-email':
+            return 'Please enter a valid email address.';
+        case 'auth/weak-password':
+            return 'Password must be at least 6 characters.';
+        case 'auth/user-not-found':
+        case 'auth/wrong-password':
+        case 'auth/invalid-credential':
+            return 'Invalid email or password. Please check your credentials.';
+        case 'auth/popup-closed-by-user':
+            return 'Google sign-in was closed before it finished.';
+        case 'auth/cancelled-popup-request':
+            return 'A Google sign-in request is already open.';
+        case 'auth/unauthorized-domain':
+            return 'Google sign-in is not authorized on this domain yet.';
+        default:
+            return error?.message || 'Something went wrong with authentication.';
+    }
+}
+
 function showDashboard() {
     document.getElementById('loginPage').style.display = 'none';
     document.getElementById('dashboardPage').style.display = 'block';
@@ -72,7 +102,7 @@ function setAuthMode(mode) {
     const signInTab = document.getElementById('signInTab');
 
     if (modeInput) modeInput.value = authMode;
-    if (submitBtn) submitBtn.textContent = authMode === 'signup' ? 'Create Account' : 'Sign In';
+    if (submitBtn) submitBtn.textContent = authMode === 'signup' ? 'Create Account' : 'Login';
     if (helpText) {
         helpText.textContent = authMode === 'signup'
             ? 'Create an account first, then sign in anytime with the same email and password.'
@@ -82,6 +112,45 @@ function setAuthMode(mode) {
         signUpTab.classList.toggle('active', authMode === 'signup');
         signInTab.classList.toggle('active', authMode === 'login');
     }
+}
+
+async function ensureAuthReady() {
+    if (!auth || authStateInitialized) return;
+
+    authStateInitialized = true;
+    auth.onAuthStateChanged(async (user) => {
+        if (user) {
+            currentUser = {
+                uid: user.uid,
+                email: user.email || '',
+                displayName: user.displayName || getDisplayNameFromEmail(user.email)
+            };
+            localStorage.setItem('currentUser', currentUser.email);
+            localStorage.setItem('isLoggedIn', 'true');
+            localStorage.setItem('olmSession', JSON.stringify(currentUser));
+            showDashboard();
+            await loadDashboard();
+        } else {
+            clearSession();
+            showLogin();
+        }
+        authReady = true;
+    });
+}
+
+function setAuthBusy(isBusy, label) {
+    const submitBtn = document.getElementById('authSubmitBtn');
+    const googleBtn = document.querySelector('.google-btn');
+    const inputs = ['email', 'password'].map((id) => document.getElementById(id)).filter(Boolean);
+
+    if (submitBtn) {
+        submitBtn.disabled = isBusy;
+        if (label) submitBtn.textContent = label;
+    }
+    if (googleBtn) googleBtn.disabled = isBusy;
+    inputs.forEach((input) => {
+        input.disabled = isBusy;
+    });
 }
 
 // ===== LOGIN SYSTEM =====
@@ -103,95 +172,115 @@ async function handleLogin(event) {
         return;
     }
 
-    const users = getStoredUsers();
+    setAuthBusy(true, mode === 'signup' ? 'Creating Account...' : 'Signing In...');
 
-    if (mode === 'signup') {
-        if (users[email]) {
-            showAlert('An account with that email already exists. Please sign in.', 'warning');
-            setAuthMode('login');
+    try {
+        if (auth) {
+            if (mode === 'signup') {
+                await auth.createUserWithEmailAndPassword(email, password);
+                const user = auth.currentUser;
+                if (user && !user.displayName) {
+                    await user.updateProfile({ displayName: getDisplayNameFromEmail(email) });
+                }
+                document.getElementById('loginForm').reset();
+                setAuthMode('signup');
+                showAlert('Account created successfully. Welcome ' + email, 'success');
+            } else {
+                await auth.signInWithEmailAndPassword(email, password);
+                document.getElementById('loginForm').reset();
+                setAuthMode('signup');
+                showAlert('Login successful! Welcome ' + email, 'success');
+            }
             return;
         }
 
-        users[email] = { email, password };
-        saveStoredUsers(users);
+        const users = getStoredUsers();
 
-        setSession({ email, displayName: email.split('@')[0] });
-        
-        // Clear form before showing dashboard
-        document.getElementById('loginForm').reset();
-        document.getElementById('authMode').value = 'signup';
-        
-        showDashboard();
-        await loadDashboard();
-        showAlert('Account created successfully. Welcome ' + email, 'success');
-        return;
-    }
+        if (mode === 'signup') {
+            if (users[email]) {
+                showAlert('An account with that email already exists. Please sign in.', 'warning');
+                setAuthMode('login');
+                return;
+            }
 
-    if (mode === 'login') {
+            users[email] = { email, password };
+            saveStoredUsers(users);
+            setSession({ email, displayName: getDisplayNameFromEmail(email) });
+            document.getElementById('loginForm').reset();
+            setAuthMode('signup');
+            showDashboard();
+            await loadDashboard();
+            showAlert('Account created successfully. Welcome ' + email, 'success');
+            return;
+        }
+
         if (!users[email] || users[email].password !== password) {
             showAlert('Invalid email or password. Please check your credentials.', 'danger');
             return;
         }
 
-        setSession({ email, displayName: email.split('@')[0] });
-        
-        // Clear form before showing dashboard
+        setSession({ email, displayName: getDisplayNameFromEmail(email) });
         document.getElementById('loginForm').reset();
-        document.getElementById('authMode').value = 'signup';
-        
+        setAuthMode('signup');
         showDashboard();
         await loadDashboard();
         showAlert("Login successful! Welcome " + email, 'success');
+    } catch (error) {
+        showAlert(normalizeAuthError(error), 'danger');
+        if (error?.code === 'auth/email-already-in-use') {
+            setAuthMode('login');
+        }
+    } finally {
+        setAuthBusy(false, authMode === 'signup' ? 'Create Account' : 'Login');
     }
 }
 
 // ===== GOOGLE LOGIN =====
 async function handleGoogleLogin() {
+    setAuthBusy(true, 'Continuing...');
     try {
-        const provider = new firebase.auth.GoogleAuthProvider();
-        const result = await auth.signInWithPopup(provider);
-        const user = result.user;
+        if (auth) {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            const result = await auth.signInWithPopup(provider);
+            const user = result.user;
+            currentUser = {
+                uid: user.uid,
+                email: user.email || '',
+                displayName: user.displayName || getDisplayNameFromEmail(user.email)
+            };
+            localStorage.setItem('currentUser', currentUser.email);
+            localStorage.setItem('isLoggedIn', 'true');
+            localStorage.setItem('olmSession', JSON.stringify(currentUser));
+            showDashboard();
+            await loadDashboard();
+            showAlert("Continued with Google account " + (currentUser.displayName || currentUser.email), 'success');
+            return;
+        }
 
-        currentUser = user;
-
-        localStorage.setItem('currentUser', user.email);
-        localStorage.setItem('isLoggedIn', 'true');
-        localStorage.setItem('olmSession', JSON.stringify({
-            email: user.email,
-            displayName: user.displayName || user.email
-        }));
-
-        document.getElementById('loginPage').style.display = 'none';
-        document.getElementById('dashboardPage').style.display = 'block';
-
-        await loadDashboard();
-        showAlert("Login successful! Welcome " + (user.displayName || user.email), 'success');
-    } catch (error) {
-        console.error('Google login error:', error);
-
-        const email = window.prompt('Google sign-in is not available right now. Enter your Google email to continue:');
+        const email = window.prompt('Enter your Google email to continue:');
         if (!email) return;
 
-        setSession({ email, displayName: email.split('@')[0] });
-        
-        // Clear form
+        setSession({ email, displayName: getDisplayNameFromEmail(email) });
         document.getElementById('loginForm').reset();
-        document.getElementById('authMode').value = 'signup';
-        
+        setAuthMode('signup');
         showDashboard();
         await loadDashboard();
         showAlert("Continued with Google account " + email, 'success');
+    } catch (error) {
+        console.error('Google login error:', error);
+        showAlert(normalizeAuthError(error), 'danger');
+    } finally {
+        setAuthBusy(false, authMode === 'signup' ? 'Create Account' : 'Login');
     }
 }
 
-function handleLogout() {
+async function handleLogout() {
     if (confirm("Are you sure you want to logout?")) {
-        if (auth && auth.signOut) auth.signOut();
+        if (auth && auth.signOut) await auth.signOut();
         clearSession();
         
         // Reset form and UI
         document.getElementById('loginForm').reset();
-        document.getElementById('authMode').value = 'signup';
         setAuthMode('signup');
         
         showLogin();
@@ -704,19 +793,22 @@ window.addEventListener('load', async () => {
     }
 
     setAuthMode('signup');
+    await ensureAuthReady();
 
-    const isLoggedIn = localStorage.getItem('isLoggedIn');
-    const storedSession = localStorage.getItem('olmSession');
+    if (!auth) {
+        const isLoggedIn = localStorage.getItem('isLoggedIn');
+        const storedSession = localStorage.getItem('olmSession');
 
-    if (isLoggedIn === 'true' && storedSession) {
-        try {
-            currentUser = JSON.parse(storedSession);
-        } catch {
-            currentUser = { email: localStorage.getItem('currentUser') };
+        if (isLoggedIn === 'true' && storedSession) {
+            try {
+                currentUser = JSON.parse(storedSession);
+            } catch {
+                currentUser = { email: localStorage.getItem('currentUser') };
+            }
+            showDashboard();
+            await loadDashboard();
+            return;
         }
-        showDashboard();
-        await loadDashboard();
-        return;
     }
 
     showLogin();
