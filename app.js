@@ -66,15 +66,18 @@ function normalizeAuthError(error) {
     const code = error?.code || '';
     switch (code) {
         case 'auth/email-already-in-use':
-            return 'An account with that email already exists. Please sign in instead.';
+            return 'User already exists. Please sign in instead.';
         case 'auth/invalid-email':
             return 'Please enter a valid email address.';
         case 'auth/weak-password':
-            return 'Password must be at least 6 characters.';
+            return 'Password is too short. Firebase requires at least 6 characters.';
         case 'auth/user-not-found':
         case 'auth/wrong-password':
+        case 'auth/user-disabled':
         case 'auth/invalid-credential':
-            return 'Invalid email or password. Please check your credentials.';
+            return code === 'auth/user-not-found'
+                ? 'User does not exist. Please sign in first.'
+                : 'Password is incorrect. Please try again.';
         case 'auth/popup-closed-by-user':
             return 'Google sign-in was closed before it finished.';
         case 'auth/cancelled-popup-request':
@@ -169,11 +172,6 @@ async function handleLogin(event) {
     // Validation
     if (!email || !password) {
         showAlert('Please fill in all fields', 'danger');
-        return;
-    }
-
-    if (password.length < 6) {
-        showAlert('Password must be at least 6 characters', 'danger');
         return;
     }
 
