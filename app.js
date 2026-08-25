@@ -38,19 +38,65 @@ async function handleLogin(event) {
         await loadDashboard();
         showAlert("Login successful! Welcome " + email, 'success');
     } catch (error) {
-        // Fallback to demo mode
+        // If login fails, try to create account automatically
         if (password === "123456") {
-            localStorage.setItem('currentUser', email);
-            localStorage.setItem('isLoggedIn', 'true');
-            
-            document.getElementById('loginPage').style.display = 'none';
-            document.getElementById('dashboardPage').style.display = 'block';
-            
-            loadDashboard();
-            showAlert("Login successful (Demo Mode)!", 'warning');
+            try {
+                // Try to create user
+                const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+                currentUser = userCredential.user;
+                
+                localStorage.setItem('currentUser', email);
+                localStorage.setItem('isLoggedIn', 'true');
+                
+                document.getElementById('loginPage').style.display = 'none';
+                document.getElementById('dashboardPage').style.display = 'block';
+                
+                await loadDashboard();
+                showAlert("Account created! Welcome " + email, 'success');
+            } catch (createError) {
+                // If user already exists, try login again
+                try {
+                    const userCredential = await auth.signInWithEmailAndPassword(email, password);
+                    currentUser = userCredential.user;
+                    
+                    localStorage.setItem('currentUser', email);
+                    localStorage.setItem('isLoggedIn', 'true');
+                    
+                    document.getElementById('loginPage').style.display = 'none';
+                    document.getElementById('dashboardPage').style.display = 'block';
+                    
+                    await loadDashboard();
+                    showAlert("Login successful! Welcome " + email, 'success');
+                } catch (loginError) {
+                    showAlert("Invalid credentials. Try password: 123456", 'danger');
+                }
+            }
         } else {
             showAlert("Invalid credentials. Try password: 123456", 'danger');
         }
+    }
+}
+
+// ===== GOOGLE LOGIN =====
+async function handleGoogleLogin() {
+    try {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        const result = await auth.signInWithPopup(provider);
+        const user = result.user;
+        
+        currentUser = user;
+        
+        localStorage.setItem('currentUser', user.email);
+        localStorage.setItem('isLoggedIn', 'true');
+        
+        document.getElementById('loginPage').style.display = 'none';
+        document.getElementById('dashboardPage').style.display = 'block';
+        
+        await loadDashboard();
+        showAlert("Login successful! Welcome " + user.displayName, 'success');
+    } catch (error) {
+        console.error('Google login error:', error);
+        showAlert("Google login failed: " + error.message, 'danger');
     }
 }
 
