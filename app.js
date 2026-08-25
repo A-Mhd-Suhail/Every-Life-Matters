@@ -88,9 +88,20 @@ function setAuthMode(mode) {
 async function handleLogin(event) {
     event.preventDefault();
     
-    const email = document.getElementById('email').value;
+    const email = document.getElementById('email').value.trim();
     const password = document.getElementById('password').value;
     const mode = document.getElementById('authMode')?.value || authMode;
+
+    // Validation
+    if (!email || !password) {
+        showAlert('Please fill in all fields', 'danger');
+        return;
+    }
+
+    if (password.length < 6) {
+        showAlert('Password must be at least 6 characters', 'danger');
+        return;
+    }
 
     const users = getStoredUsers();
 
@@ -105,22 +116,33 @@ async function handleLogin(event) {
         saveStoredUsers(users);
 
         setSession({ email, displayName: email.split('@')[0] });
+        
+        // Clear form before showing dashboard
+        document.getElementById('loginForm').reset();
+        document.getElementById('authMode').value = 'signup';
+        
         showDashboard();
         await loadDashboard();
         showAlert('Account created successfully. Welcome ' + email, 'success');
         return;
     }
 
-    if (!users[email] || users[email].password !== password) {
-        showAlert('Invalid email or password. Please sign up first or check your credentials.', 'danger');
-        return;
+    if (mode === 'login') {
+        if (!users[email] || users[email].password !== password) {
+            showAlert('Invalid email or password. Please check your credentials.', 'danger');
+            return;
+        }
+
+        setSession({ email, displayName: email.split('@')[0] });
+        
+        // Clear form before showing dashboard
+        document.getElementById('loginForm').reset();
+        document.getElementById('authMode').value = 'signup';
+        
+        showDashboard();
+        await loadDashboard();
+        showAlert("Login successful! Welcome " + email, 'success');
     }
-
-    setSession({ email, displayName: email.split('@')[0] });
-    showDashboard();
-
-    await loadDashboard();
-    showAlert("Login successful! Welcome " + email, 'success');
 }
 
 // ===== GOOGLE LOGIN =====
@@ -151,6 +173,11 @@ async function handleGoogleLogin() {
         if (!email) return;
 
         setSession({ email, displayName: email.split('@')[0] });
+        
+        // Clear form
+        document.getElementById('loginForm').reset();
+        document.getElementById('authMode').value = 'signup';
+        
         showDashboard();
         await loadDashboard();
         showAlert("Continued with Google account " + email, 'success');
@@ -161,9 +188,13 @@ function handleLogout() {
     if (confirm("Are you sure you want to logout?")) {
         if (auth && auth.signOut) auth.signOut();
         clearSession();
-        showLogin();
+        
+        // Reset form and UI
         document.getElementById('loginForm').reset();
+        document.getElementById('authMode').value = 'signup';
         setAuthMode('signup');
+        
+        showLogin();
         
         showAlert("Logged out successfully", 'success');
     }
@@ -246,15 +277,14 @@ async function addPatient() {
             name,
             email,
             phone,
-            age,
+            age: parseInt(age) || 0,
             condition,
             bp: '120/80',
-            hr: 72,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            heartRate: '72',
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
         });
         
         showAlert("Patient added successfully!", 'success');
-        
         document.getElementById('patientName').value = '';
         document.getElementById('patientEmail').value = '';
         document.getElementById('patientPhone').value = '';
@@ -262,8 +292,6 @@ async function addPatient() {
         document.getElementById('patientCondition').value = '';
         
         await loadPatients();
-        await updateStats();
-        await loadPatientSelect();
     } catch (error) {
         showAlert("Error adding patient: " + error.message, 'danger');
     }
@@ -275,7 +303,7 @@ async function loadPatients() {
     
     try {
         if (!db) {
-            list.innerHTML = '<p>Database is unavailable in this session.</p>';
+            list.innerHTML = '<p>No patients added yet.</p>';
             return;
         }
         const querySnapshot = await db.collection('patients').get();
@@ -284,17 +312,33 @@ async function loadPatients() {
         querySnapshot.forEach((doc) => {
             const patient = doc.data();
             const div = document.createElement('div');
-            div.className = 'patient-item';
+            div.className = 'card';
             div.innerHTML = `
-                <strong>${patient.name}</strong><br>
-                Email: ${patient.email} | Phone: ${patient.phone}<br>
-                Condition: ${patient.condition}
+                <h3>${patient.name}</h3>
+                <p>Email: ${patient.email}</p>
+                <p>Phone: ${patient.phone}</p>
+                <p>Age: ${patient.age}</p>
+                <p>Condition: ${patient.condition}</p>
+                <button onclick="deletePatient('${doc.id}')" class="delete-btn">Delete</button>
             `;
             list.appendChild(div);
         });
     } catch (error) {
-        list.innerHTML = '<p>Error loading patients. Make sure Firestore is set up.</p>';
+        list.innerHTML = '<p>No patients added yet.</p>';
         console.error('Error loading patients:', error);
+    }
+}
+
+async function deletePatient(patientId) {
+    if (confirm("Are you sure you want to delete this patient?")) {
+        try {
+            if (!db) return;
+            await db.collection('patients').doc(patientId).delete();
+            showAlert("Patient deleted successfully", 'success');
+            await loadPatients();
+        } catch (error) {
+            showAlert("Error deleting patient: " + error.message, 'danger');
+        }
     }
 }
 
@@ -303,12 +347,8 @@ async function loadPatientSelect() {
     select.innerHTML = '<option>Choose patient...</option>';
     
     try {
-        if (!db) {
-            list.innerHTML = '<p>Database is unavailable in this session.</p>';
-            return;
-        }
+        if (!db) return;
         const querySnapshot = await db.collection('patients').get();
-        
         querySnapshot.forEach((doc) => {
             const patient = doc.data();
             const option = document.createElement('option');
@@ -317,31 +357,36 @@ async function loadPatientSelect() {
             select.appendChild(option);
         });
     } catch (error) {
-        console.error('Error loading patients for select:', error);
+        console.error('Error loading patient select:', error);
     }
 }
 
 async function loadPatientDetails() {
-    const patientId = document.getElementById('patientSelect').value;
-    if (!patientId) return;
+    const select = document.getElementById('patientSelect');
+    const detailsCard = document.getElementById('patientDetailsCard');
+    
+    if (select.value === '') {
+        detailsCard.classList.add('hidden');
+        return;
+    }
     
     try {
-        if (!db) return;
-        const docRef = db.collection('patients').doc(patientId);
-        const doc = await docRef.get();
-        
-        if (doc.exists) {
-            const patient = doc.data();
-            document.getElementById('detailName').textContent = patient.name;
-            document.getElementById('detailEmail').textContent = patient.email;
-            document.getElementById('detailPhone').textContent = patient.phone;
-            document.getElementById('detailAge').textContent = patient.age;
-            document.getElementById('detailCondition').textContent = patient.condition;
-            document.getElementById('detailBP').textContent = patient.bp;
-            document.getElementById('detailHR').textContent = patient.hr + " bpm";
-            
-            document.getElementById('patientDetailsCard').classList.remove('hidden');
+        if (!db) {
+            showAlert('Database unavailable', 'warning');
+            return;
         }
+        const doc = await db.collection('patients').doc(select.value).get();
+        const patient = doc.data();
+        
+        document.getElementById('detailName').textContent = patient.name;
+        document.getElementById('detailEmail').textContent = patient.email;
+        document.getElementById('detailPhone').textContent = patient.phone;
+        document.getElementById('detailAge').textContent = patient.age;
+        document.getElementById('detailCondition').textContent = patient.condition;
+        document.getElementById('detailBP').textContent = patient.bp || '120/80';
+        document.getElementById('detailHR').textContent = patient.heartRate || '72';
+        
+        detailsCard.classList.remove('hidden');
     } catch (error) {
         console.error('Error loading patient details:', error);
     }
@@ -350,13 +395,13 @@ async function loadPatientDetails() {
 // ===== MEDICATIONS =====
 async function addMedication() {
     const patient = document.getElementById('medPatient').value;
-    const medicine = document.getElementById('medName').value;
+    const name = document.getElementById('medName').value;
     const dosage = document.getElementById('medDosage').value;
     const time = document.getElementById('medTime').value;
     const days = document.getElementById('medDays').value;
     
-    if (!patient || !medicine || !dosage || !time) {
-        showAlert("Please fill all fields", 'danger');
+    if (!patient || !name || !dosage || !time || !days) {
+        showAlert("Please fill all medication fields", 'danger');
         return;
     }
     
@@ -367,15 +412,14 @@ async function addMedication() {
         }
         await db.collection('medications').add({
             patient,
-            medicine,
+            name,
             dosage,
             time,
-            days,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            days: parseInt(days),
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
         });
         
-        showAlert("Medication schedule added!", 'success');
-        
+        showAlert("Medication added successfully!", 'success');
         document.getElementById('medPatient').value = '';
         document.getElementById('medName').value = '';
         document.getElementById('medDosage').value = '';
@@ -390,30 +434,46 @@ async function addMedication() {
 
 async function loadMedications() {
     const list = document.getElementById('medicationsList');
-    list.innerHTML = '<h3>Current Medications</h3><p>Loading...</p>';
+    list.innerHTML = '<p>Loading medications...</p>';
     
     try {
         if (!db) {
-            list.innerHTML = '<h3>Current Medications</h3><p>Database is unavailable in this session.</p>';
+            list.innerHTML = '<p>No medications yet.</p>';
             return;
         }
         const querySnapshot = await db.collection('medications').get();
-        list.innerHTML = '<h3>Current Medications</h3>';
+        list.innerHTML = '';
         
         querySnapshot.forEach((doc) => {
             const med = doc.data();
             const div = document.createElement('div');
-            div.className = 'patient-item';
+            div.className = 'card';
             div.innerHTML = `
-                <strong>${med.medicine}</strong> - ${med.dosage}<br>
-                Patient: ${med.patient} | Time: ${med.time}<br>
-                Duration: ${med.days} days
+                <h3>${med.name}</h3>
+                <p>Patient: ${med.patient}</p>
+                <p>Dosage: ${med.dosage}</p>
+                <p>Time: ${med.time}</p>
+                <p>Duration: ${med.days} days</p>
+                <button onclick="deleteMedication('${doc.id}')" class="delete-btn">Delete</button>
             `;
             list.appendChild(div);
         });
     } catch (error) {
-        list.innerHTML = '<h3>Current Medications</h3><p>No medications found</p>';
+        list.innerHTML = '<p>No medications</p>';
         console.error('Error loading medications:', error);
+    }
+}
+
+async function deleteMedication(medId) {
+    if (confirm("Are you sure?")) {
+        try {
+            if (!db) return;
+            await db.collection('medications').doc(medId).delete();
+            showAlert("Medication deleted", 'success');
+            await loadMedications();
+        } catch (error) {
+            showAlert("Error: " + error.message, 'danger');
+        }
     }
 }
 
@@ -637,6 +697,12 @@ function showAlert(message, type) {
 
 // ===== INITIALIZATION =====
 window.addEventListener('load', async () => {
+    // Set up form submission
+    const loginForm = document.getElementById('loginForm');
+    if (loginForm) {
+        loginForm.addEventListener('submit', handleLogin);
+    }
+
     setAuthMode('signup');
 
     const isLoggedIn = localStorage.getItem('isLoggedIn');
