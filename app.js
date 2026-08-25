@@ -20,6 +20,9 @@ if (window.firebase) {
         firebase.initializeApp(firebaseConfig);
         db = firebase.firestore();
         auth = firebase.auth();
+        auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch((error) => {
+            console.warn('Firebase auth persistence could not be set:', error);
+        });
     } catch (error) {
         console.warn('Firebase init failed, using local demo mode:', error);
     }
@@ -77,7 +80,9 @@ function normalizeAuthError(error) {
         case 'auth/cancelled-popup-request':
             return 'A Google sign-in request is already open.';
         case 'auth/unauthorized-domain':
-            return 'Google sign-in is not authorized on this domain yet.';
+            return 'Google sign-in is not authorized on this domain yet. Add your GitHub Pages domain in Firebase Auth settings.';
+        case 'auth/network-request-failed':
+            return 'A network error occurred while contacting Firebase. Please try again.';
         default:
             return error?.message || 'Something went wrong with authentication.';
     }
@@ -241,19 +246,7 @@ async function handleGoogleLogin() {
     try {
         if (auth) {
             const provider = new firebase.auth.GoogleAuthProvider();
-            const result = await auth.signInWithPopup(provider);
-            const user = result.user;
-            currentUser = {
-                uid: user.uid,
-                email: user.email || '',
-                displayName: user.displayName || getDisplayNameFromEmail(user.email)
-            };
-            localStorage.setItem('currentUser', currentUser.email);
-            localStorage.setItem('isLoggedIn', 'true');
-            localStorage.setItem('olmSession', JSON.stringify(currentUser));
-            showDashboard();
-            await loadDashboard();
-            showAlert("Continued with Google account " + (currentUser.displayName || currentUser.email), 'success');
+            await auth.signInWithRedirect(provider);
             return;
         }
 
@@ -794,6 +787,30 @@ window.addEventListener('load', async () => {
 
     setAuthMode('signup');
     await ensureAuthReady();
+
+    if (auth) {
+        try {
+            const redirectResult = await auth.getRedirectResult();
+            if (redirectResult?.user) {
+                const user = redirectResult.user;
+                currentUser = {
+                    uid: user.uid,
+                    email: user.email || '',
+                    displayName: user.displayName || getDisplayNameFromEmail(user.email)
+                };
+                localStorage.setItem('currentUser', currentUser.email);
+                localStorage.setItem('isLoggedIn', 'true');
+                localStorage.setItem('olmSession', JSON.stringify(currentUser));
+                showDashboard();
+                await loadDashboard();
+                showAlert("Continued with Google account " + (currentUser.displayName || currentUser.email), 'success');
+                return;
+            }
+        } catch (error) {
+            console.error('Firebase redirect result error:', error);
+            showAlert(normalizeAuthError(error), 'danger');
+        }
+    }
 
     if (!auth) {
         const isLoggedIn = localStorage.getItem('isLoggedIn');
