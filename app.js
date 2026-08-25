@@ -10,9 +10,18 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-const auth = firebase.auth();
+let db = null;
+let auth = null;
+
+if (window.firebase) {
+    try {
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.firestore();
+        auth = firebase.auth();
+    } catch (error) {
+        console.warn('Firebase init failed, using local demo mode:', error);
+    }
+}
 
 // ===== Global State =====
 let currentUser = null;
@@ -28,6 +37,30 @@ function getStoredUsers() {
 
 function saveStoredUsers(users) {
     localStorage.setItem('olmUsers', JSON.stringify(users));
+}
+
+function setSession(user) {
+    currentUser = user;
+    localStorage.setItem('currentUser', user.email || '');
+    localStorage.setItem('isLoggedIn', 'true');
+    localStorage.setItem('olmSession', JSON.stringify(user));
+}
+
+function clearSession() {
+    currentUser = null;
+    localStorage.removeItem('currentUser');
+    localStorage.removeItem('isLoggedIn');
+    localStorage.removeItem('olmSession');
+}
+
+function showDashboard() {
+    document.getElementById('loginPage').style.display = 'none';
+    document.getElementById('dashboardPage').style.display = 'block';
+}
+
+function showLogin() {
+    document.getElementById('dashboardPage').style.display = 'none';
+    document.getElementById('loginPage').style.display = 'flex';
 }
 
 function setAuthMode(mode) {
@@ -71,13 +104,8 @@ async function handleLogin(event) {
         users[email] = { email, password };
         saveStoredUsers(users);
 
-        currentUser = { email, displayName: email.split('@')[0] };
-        localStorage.setItem('currentUser', email);
-        localStorage.setItem('isLoggedIn', 'true');
-        localStorage.setItem('olmSession', JSON.stringify(currentUser));
-
-        document.getElementById('loginPage').style.display = 'none';
-        document.getElementById('dashboardPage').style.display = 'block';
+        setSession({ email, displayName: email.split('@')[0] });
+        showDashboard();
         await loadDashboard();
         showAlert('Account created successfully. Welcome ' + email, 'success');
         return;
@@ -88,13 +116,8 @@ async function handleLogin(event) {
         return;
     }
 
-    currentUser = { email, displayName: email.split('@')[0] };
-    localStorage.setItem('currentUser', email);
-    localStorage.setItem('isLoggedIn', 'true');
-    localStorage.setItem('olmSession', JSON.stringify(currentUser));
-
-    document.getElementById('loginPage').style.display = 'none';
-    document.getElementById('dashboardPage').style.display = 'block';
+    setSession({ email, displayName: email.split('@')[0] });
+    showDashboard();
 
     await loadDashboard();
     showAlert("Login successful! Welcome " + email, 'success');
@@ -127,13 +150,8 @@ async function handleGoogleLogin() {
         const email = window.prompt('Google sign-in is not available right now. Enter your Google email to continue:');
         if (!email) return;
 
-        currentUser = { email, displayName: email.split('@')[0] };
-        localStorage.setItem('currentUser', email);
-        localStorage.setItem('isLoggedIn', 'true');
-        localStorage.setItem('olmSession', JSON.stringify(currentUser));
-
-        document.getElementById('loginPage').style.display = 'none';
-        document.getElementById('dashboardPage').style.display = 'block';
+        setSession({ email, displayName: email.split('@')[0] });
+        showDashboard();
         await loadDashboard();
         showAlert("Continued with Google account " + email, 'success');
     }
@@ -141,13 +159,9 @@ async function handleGoogleLogin() {
 
 function handleLogout() {
     if (confirm("Are you sure you want to logout?")) {
-        auth.signOut();
-        localStorage.removeItem('currentUser');
-        localStorage.removeItem('isLoggedIn');
-        localStorage.removeItem('olmSession');
-        
-        document.getElementById('dashboardPage').style.display = 'none';
-        document.getElementById('loginPage').style.display = 'flex';
+        if (auth && auth.signOut) auth.signOut();
+        clearSession();
+        showLogin();
         document.getElementById('loginForm').reset();
         setAuthMode('signup');
         
@@ -186,6 +200,13 @@ async function loadDashboard() {
 
 async function updateStats() {
     try {
+        if (!db) {
+            document.getElementById('totalPatients').textContent = '0';
+            document.getElementById('criticalCases').textContent = '0';
+            document.getElementById('appointments').textContent = '0';
+            document.getElementById('alerts').textContent = '0';
+            return;
+        }
         const patientsSnap = await db.collection('patients').get();
         const emergenciesSnap = await db.collection('emergencies').get();
         const medicationsSnap = await db.collection('medications').get();
@@ -217,6 +238,10 @@ async function addPatient() {
     }
     
     try {
+        if (!db) {
+            showAlert('Database is unavailable in this session.', 'warning');
+            return;
+        }
         await db.collection('patients').add({
             name,
             email,
@@ -249,6 +274,10 @@ async function loadPatients() {
     list.innerHTML = '<p>Loading patients...</p>';
     
     try {
+        if (!db) {
+            list.innerHTML = '<p>Database is unavailable in this session.</p>';
+            return;
+        }
         const querySnapshot = await db.collection('patients').get();
         list.innerHTML = '';
         
@@ -274,6 +303,10 @@ async function loadPatientSelect() {
     select.innerHTML = '<option>Choose patient...</option>';
     
     try {
+        if (!db) {
+            list.innerHTML = '<p>Database is unavailable in this session.</p>';
+            return;
+        }
         const querySnapshot = await db.collection('patients').get();
         
         querySnapshot.forEach((doc) => {
@@ -293,6 +326,7 @@ async function loadPatientDetails() {
     if (!patientId) return;
     
     try {
+        if (!db) return;
         const docRef = db.collection('patients').doc(patientId);
         const doc = await docRef.get();
         
@@ -327,6 +361,10 @@ async function addMedication() {
     }
     
     try {
+        if (!db) {
+            showAlert('Database is unavailable in this session.', 'warning');
+            return;
+        }
         await db.collection('medications').add({
             patient,
             medicine,
@@ -355,6 +393,10 @@ async function loadMedications() {
     list.innerHTML = '<h3>Current Medications</h3><p>Loading...</p>';
     
     try {
+        if (!db) {
+            list.innerHTML = '<h3>Current Medications</h3><p>Database is unavailable in this session.</p>';
+            return;
+        }
         const querySnapshot = await db.collection('medications').get();
         list.innerHTML = '<h3>Current Medications</h3>';
         
@@ -381,6 +423,10 @@ async function loadNotifications() {
     list.innerHTML = '<p>Loading notifications...</p>';
     
     try {
+        if (!db) {
+            list.innerHTML = '<p>No notifications yet.</p>';
+            return;
+        }
         const querySnapshot = await db.collection('notifications').orderBy('createdAt', 'desc').get();
         list.innerHTML = '';
         
@@ -409,6 +455,10 @@ async function triggerEmergency() {
     }
     
     try {
+        if (!db) {
+            showAlert('Database is unavailable in this session.', 'warning');
+            return;
+        }
         await db.collection('emergencies').add({
             patient,
             type,
@@ -440,6 +490,10 @@ async function loadEmergencyLog() {
     log.innerHTML = '<h3>Emergency Log</h3><p>Loading...</p>';
     
     try {
+        if (!db) {
+            log.innerHTML = '<h3>Emergency Log</h3><p>No emergency alerts yet.</p>';
+            return;
+        }
         const querySnapshot = await db.collection('emergencies').orderBy('timestamp', 'desc').get();
         log.innerHTML = '<h3>Emergency Log</h3>';
         
@@ -547,6 +601,11 @@ function submitForm() {
         return;
     }
     
+    if (!db) {
+        showAlert('Database is unavailable in this session.', 'warning');
+        return;
+    }
+
     db.collection('forms').add({
         patient: name,
         symptoms,
@@ -589,12 +648,10 @@ window.addEventListener('load', async () => {
         } catch {
             currentUser = { email: localStorage.getItem('currentUser') };
         }
-        document.getElementById('loginPage').style.display = 'none';
-        document.getElementById('dashboardPage').style.display = 'block';
+        showDashboard();
         await loadDashboard();
         return;
     }
 
-    document.getElementById('loginPage').style.display = 'flex';
-    document.getElementById('dashboardPage').style.display = 'none';
+    showLogin();
 });
