@@ -1,52 +1,21 @@
-// ===== Global State =====
-let API_BASE = 'http://localhost:3000/api';
-let socket = null;
-
-// Fallback in-memory database (for demo if backend fails)
-let database = {
-    patients: [],
-    medications: [],
-    emergencyAlerts: [],
-    notifications: [],
-    forms: []
+// ===== Firebase Configuration =====
+const firebaseConfig = {
+    apiKey: "AIzaSyBXdkeWIoIlMEa5DWIrE4yHuI_jHTeM1mo",
+    authDomain: "every-life-matters-8aca8.firebaseapp.com",
+    projectId: "every-life-matters-8aca8",
+    storageBucket: "every-life-matters-8aca8.firebasestorage.app",
+    messagingSenderId: "471031101690",
+    appId: "1:471031101690:web:56f82fae6aa0287e787143",
+    measurementId: "G-4K1CNF2MZ7"
 };
 
-// ===== Initialize Demo Data (fallback) =====
-function initializeDatabase() {
-    database.patients = [
-        { id: 1, name: "John Doe", email: "john@email.com", phone: "9876543210", age: 45, condition: "Diabetes", bp: "120/80", hr: 72 },
-        { id: 2, name: "Jane Smith", email: "jane@email.com", phone: "9876543211", age: 38, condition: "Hypertension", bp: "140/90", hr: 85 }
-    ];
-    
-    database.medications = [
-        { id: 1, patient: "John Doe", medicine: "Metformin", dosage: "500mg", time: "08:00", days: 30 },
-        { id: 2, patient: "Jane Smith", medicine: "Lisinopril", dosage: "10mg", time: "09:00", days: 60 }
-    ];
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const auth = firebase.auth();
 
-    database.notifications = [
-        { id: 1, type: "info", message: "System online", time: new Date().toLocaleTimeString() },
-        { id: 2, type: "warning", message: "Patient John Doe: Blood pressure high", time: new Date().toLocaleTimeString() }
-    ];
-}
-
-// ===== API Helper Functions =====
-async function apiRequest(endpoint, method = 'GET', body = null) {
-    const headers = { 'Content-Type': 'application/json' };
-    const token = localStorage.getItem('token');
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-
-    const options = { method, headers };
-    if (body) options.body = JSON.stringify(body);
-
-    try {
-        const response = await fetch(`${API_BASE}${endpoint}`, options);
-        if (!response.ok) throw new Error('API request failed');
-        return await response.json();
-    } catch (error) {
-        console.error('API Error:', error);
-        return null;
-    }
-}
+// ===== Global State =====
+let currentUser = null;
 
 // ===== LOGIN SYSTEM =====
 async function handleLogin(event) {
@@ -55,46 +24,41 @@ async function handleLogin(event) {
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
     
-    // Try backend login first
-    const data = await apiRequest('/login', 'POST', { email, password });
-    
-    if (data && data.success) {
+    try {
+        // Try Firebase Authentication
+        const userCredential = await auth.signInWithEmailAndPassword(email, password);
+        currentUser = userCredential.user;
+        
         localStorage.setItem('currentUser', email);
         localStorage.setItem('isLoggedIn', 'true');
         
         document.getElementById('loginPage').style.display = 'none';
         document.getElementById('dashboardPage').style.display = 'block';
         
-        await loadDashboardData();
+        await loadDashboard();
         showAlert("Login successful! Welcome " + email, 'success');
-        connectWebSocket();
-        return;
+    } catch (error) {
+        // Fallback to demo mode
+        if (password === "123456") {
+            localStorage.setItem('currentUser', email);
+            localStorage.setItem('isLoggedIn', 'true');
+            
+            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('dashboardPage').style.display = 'block';
+            
+            loadDashboard();
+            showAlert("Login successful (Demo Mode)!", 'warning');
+        } else {
+            showAlert("Invalid credentials. Try password: 123456", 'danger');
+        }
     }
-    
-    // Fallback to demo mode (only if password is "123456")
-    if (password === "123456") {
-        localStorage.setItem('currentUser', email);
-        localStorage.setItem('isLoggedIn', 'true');
-        
-        document.getElementById('loginPage').style.display = 'none';
-        document.getElementById('dashboardPage').style.display = 'block';
-        
-        initializeDatabase();
-        loadDashboard();
-        updateStats();
-        
-        showAlert("Login successful (Demo Mode - Firebase not reachable)", 'warning');
-        return;
-    }
-    
-    showAlert("Invalid credentials. Try password: 123456", 'danger');
 }
 
 function handleLogout() {
     if (confirm("Are you sure you want to logout?")) {
+        auth.signOut();
         localStorage.removeItem('currentUser');
         localStorage.removeItem('isLoggedIn');
-        localStorage.removeItem('token');
         
         document.getElementById('dashboardPage').style.display = 'none';
         document.getElementById('loginPage').style.display = 'flex';
@@ -117,7 +81,6 @@ function showPage(pageName) {
     });
     event.target.classList.add('active');
     
-    // Load page-specific data
     if (pageName === 'dashboard') loadDashboard();
     if (pageName === 'patients') loadPatients();
     if (pageName === 'patientDetails') loadPatientSelect();
@@ -135,21 +98,22 @@ async function loadDashboard() {
 }
 
 async function updateStats() {
-    // Try backend stats
-    const stats = await apiRequest('/stats');
-    if (stats && stats.success) {
-        document.getElementById('totalPatients').textContent = stats.stats.totalPatients;
-        document.getElementById('criticalCases').textContent = stats.stats.activeEmergencies;
-        document.getElementById('appointments').textContent = Math.floor(Math.random() * 5) + 2; // demo
-        document.getElementById('alerts').textContent = stats.stats.totalMedications; // use medication count as alerts
-        return;
+    try {
+        const patientsSnap = await db.collection('patients').get();
+        const emergenciesSnap = await db.collection('emergencies').get();
+        const medicationsSnap = await db.collection('medications').get();
+        
+        document.getElementById('totalPatients').textContent = patientsSnap.size;
+        document.getElementById('criticalCases').textContent = emergenciesSnap.size;
+        document.getElementById('appointments').textContent = Math.floor(Math.random() * 5) + 2;
+        document.getElementById('alerts').textContent = medicationsSnap.size;
+    } catch (error) {
+        console.error('Error loading stats:', error);
+        document.getElementById('totalPatients').textContent = '0';
+        document.getElementById('criticalCases').textContent = '0';
+        document.getElementById('appointments').textContent = '0';
+        document.getElementById('alerts').textContent = '0';
     }
-    
-    // Fallback to local
-    document.getElementById('totalPatients').textContent = database.patients.length;
-    document.getElementById('criticalCases').textContent = database.emergencyAlerts.filter(e => e.status === 'ACTIVE').length;
-    document.getElementById('appointments').textContent = Math.floor(Math.random() * 5) + 2;
-    document.getElementById('alerts').textContent = database.notifications.length;
 }
 
 // ===== PATIENT MANAGEMENT =====
@@ -165,10 +129,20 @@ async function addPatient() {
         return;
     }
     
-    // Try backend
-    const data = await apiRequest('/patients', 'POST', { name, email, phone, age, condition });
-    if (data && data.success) {
-        showAlert("Patient added to database!", 'success');
+    try {
+        await db.collection('patients').add({
+            name,
+            email,
+            phone,
+            age,
+            condition,
+            bp: '120/80',
+            hr: 72,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        showAlert("Patient added successfully!", 'success');
+        
         document.getElementById('patientName').value = '';
         document.getElementById('patientEmail').value = '';
         document.getElementById('patientPhone').value = '';
@@ -178,39 +152,21 @@ async function addPatient() {
         await loadPatients();
         await updateStats();
         await loadPatientSelect();
-        return;
+    } catch (error) {
+        showAlert("Error adding patient: " + error.message, 'danger');
     }
-    
-    // Fallback to local
-    const patient = {
-        id: database.patients.length + 1,
-        name, email, phone, age, condition,
-        bp: (Math.random() * 60 + 100).toFixed(0) + "/" + (Math.random() * 40 + 60).toFixed(0),
-        hr: Math.floor(Math.random() * 40 + 60)
-    };
-    
-    database.patients.push(patient);
-    
-    document.getElementById('patientName').value = '';
-    document.getElementById('patientEmail').value = '';
-    document.getElementById('patientPhone').value = '';
-    document.getElementById('patientAge').value = '';
-    document.getElementById('patientCondition').value = '';
-    
-    showAlert("Patient added successfully (Demo Mode)!", 'success');
-    loadPatients();
-    updateStats();
-    loadPatientSelect();
 }
 
 async function loadPatients() {
-    // Try backend
-    const data = await apiRequest('/patients');
     const list = document.getElementById('patientsList');
+    list.innerHTML = '<p>Loading patients...</p>';
     
-    if (data && data.success) {
+    try {
+        const querySnapshot = await db.collection('patients').get();
         list.innerHTML = '';
-        data.patients.forEach(patient => {
+        
+        querySnapshot.forEach((doc) => {
+            const patient = doc.data();
             const div = document.createElement('div');
             div.className = 'patient-item';
             div.innerHTML = `
@@ -220,112 +176,54 @@ async function loadPatients() {
             `;
             list.appendChild(div);
         });
-        return;
+    } catch (error) {
+        list.innerHTML = '<p>Error loading patients. Make sure Firestore is set up.</p>';
+        console.error('Error loading patients:', error);
     }
-    
-    // Fallback
-    list.innerHTML = '';
-    database.patients.forEach(patient => {
-        const div = document.createElement('div');
-        div.className = 'patient-item';
-        div.innerHTML = `
-            <strong>${patient.name}</strong><br>
-            Email: ${patient.email} | Phone: ${patient.phone}<br>
-            Condition: ${patient.condition}
-        `;
-        list.appendChild(div);
-    });
 }
 
 async function loadPatientSelect() {
     const select = document.getElementById('patientSelect');
+    select.innerHTML = '<option>Choose patient...</option>';
     
-    // Try backend
-    const data = await apiRequest('/patients');
-    if (data && data.success) {
-        select.innerHTML = '<option>Choose patient...</option>';
-        data.patients.forEach(patient => {
+    try {
+        const querySnapshot = await db.collection('patients').get();
+        
+        querySnapshot.forEach((doc) => {
+            const patient = doc.data();
             const option = document.createElement('option');
-            option.value = patient._id || patient.id;
+            option.value = doc.id;
             option.textContent = patient.name;
             select.appendChild(option);
         });
-        return;
+    } catch (error) {
+        console.error('Error loading patients for select:', error);
     }
-    
-    // Fallback
-    select.innerHTML = '<option>Choose patient...</option>';
-    database.patients.forEach(patient => {
-        const option = document.createElement('option');
-        option.value = patient.id;
-        option.textContent = patient.name;
-        select.appendChild(option);
-    });
 }
 
 async function loadPatientDetails() {
     const patientId = document.getElementById('patientSelect').value;
     if (!patientId) return;
     
-    // Try backend
-    const data = await apiRequest(`/patients/${patientId}`);
-    if (data && data.success) {
-        const patient = data.patient;
-        document.getElementById('detailName').textContent = patient.name;
-        document.getElementById('detailEmail').textContent = patient.email;
-        document.getElementById('detailPhone').textContent = patient.phone;
-        document.getElementById('detailAge').textContent = patient.age;
-        document.getElementById('detailCondition').textContent = patient.condition;
-        document.getElementById('detailBP').textContent = patient.bp;
-        document.getElementById('detailHR').textContent = patient.hr + " bpm";
-        document.getElementById('patientDetailsCard').classList.remove('hidden');
-        return;
+    try {
+        const docRef = db.collection('patients').doc(patientId);
+        const doc = await docRef.get();
+        
+        if (doc.exists) {
+            const patient = doc.data();
+            document.getElementById('detailName').textContent = patient.name;
+            document.getElementById('detailEmail').textContent = patient.email;
+            document.getElementById('detailPhone').textContent = patient.phone;
+            document.getElementById('detailAge').textContent = patient.age;
+            document.getElementById('detailCondition').textContent = patient.condition;
+            document.getElementById('detailBP').textContent = patient.bp;
+            document.getElementById('detailHR').textContent = patient.hr + " bpm";
+            
+            document.getElementById('patientDetailsCard').classList.remove('hidden');
+        }
+    } catch (error) {
+        console.error('Error loading patient details:', error);
     }
-    
-    // Fallback
-    const patient = database.patients.find(p => p.id == patientId);
-    if (patient) {
-        document.getElementById('detailName').textContent = patient.name;
-        document.getElementById('detailEmail').textContent = patient.email;
-        document.getElementById('detailPhone').textContent = patient.phone;
-        document.getElementById('detailAge').textContent = patient.age;
-        document.getElementById('detailCondition').textContent = patient.condition;
-        document.getElementById('detailBP').textContent = patient.bp;
-        document.getElementById('detailHR').textContent = patient.hr + " bpm";
-        document.getElementById('patientDetailsCard').classList.remove('hidden');
-    }
-}
-
-// ===== FORMS =====
-function submitForm() {
-    const name = document.getElementById('formName').value;
-    const symptoms = document.getElementById('formSymptoms').value;
-    const diagnosis = document.getElementById('formDiagnosis').value;
-    const notes = document.getElementById('formNotes').value;
-    
-    if (!name || !symptoms || !diagnosis) {
-        showAlert("Please fill all required fields", 'danger');
-        return;
-    }
-    
-    const formData = {
-        id: Date.now(),
-        patient: name,
-        symptoms,
-        diagnosis,
-        notes,
-        timestamp: new Date().toLocaleString()
-    };
-    
-    if (!database.forms) database.forms = [];
-    database.forms.push(formData);
-    
-    document.getElementById('formName').value = '';
-    document.getElementById('formSymptoms').value = '';
-    document.getElementById('formDiagnosis').value = '';
-    document.getElementById('formNotes').value = '';
-    
-    showAlert("Form submitted successfully!", 'success');
 }
 
 // ===== MEDICATIONS =====
@@ -341,10 +239,18 @@ async function addMedication() {
         return;
     }
     
-    // Try backend
-    const data = await apiRequest('/medications', 'POST', { patient, medicine, dosage, time, days });
-    if (data && data.success) {
+    try {
+        await db.collection('medications').add({
+            patient,
+            medicine,
+            dosage,
+            time,
+            days,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
         showAlert("Medication schedule added!", 'success');
+        
         document.getElementById('medPatient').value = '';
         document.getElementById('medName').value = '';
         document.getElementById('medDosage').value = '';
@@ -352,38 +258,21 @@ async function addMedication() {
         document.getElementById('medDays').value = '';
         
         await loadMedications();
-        return;
+    } catch (error) {
+        showAlert("Error adding medication: " + error.message, 'danger');
     }
-    
-    // Fallback
-    const medication = {
-        id: database.medications.length + 1,
-        patient, medicine, dosage, time, days
-    };
-    database.medications.push(medication);
-    
-    document.getElementById('medPatient').value = '';
-    document.getElementById('medName').value = '';
-    document.getElementById('medDosage').value = '';
-    document.getElementById('medTime').value = '';
-    document.getElementById('medDays').value = '';
-    
-    showAlert("Medication schedule added (Demo Mode)!", 'success');
-    loadMedications();
 }
 
 async function loadMedications() {
     const list = document.getElementById('medicationsList');
+    list.innerHTML = '<h3>Current Medications</h3><p>Loading...</p>';
     
-    // Try backend
-    const data = await apiRequest('/medications');
-    if (data && data.success) {
+    try {
+        const querySnapshot = await db.collection('medications').get();
         list.innerHTML = '<h3>Current Medications</h3>';
-        if (data.medications.length === 0) {
-            list.innerHTML += '<p>No medications scheduled</p>';
-            return;
-        }
-        data.medications.forEach(med => {
+        
+        querySnapshot.forEach((doc) => {
+            const med = doc.data();
             const div = document.createElement('div');
             div.className = 'patient-item';
             div.innerHTML = `
@@ -393,51 +282,32 @@ async function loadMedications() {
             `;
             list.appendChild(div);
         });
-        return;
+    } catch (error) {
+        list.innerHTML = '<h3>Current Medications</h3><p>No medications found</p>';
+        console.error('Error loading medications:', error);
     }
-    
-    // Fallback
-    list.innerHTML = '<h3>Current Medications</h3>';
-    if (database.medications.length === 0) {
-        list.innerHTML += '<p>No medications scheduled</p>';
-        return;
-    }
-    database.medications.forEach(med => {
-        const div = document.createElement('div');
-        div.className = 'patient-item';
-        div.innerHTML = `
-            <strong>${med.medicine}</strong> - ${med.dosage}<br>
-            Patient: ${med.patient} | Time: ${med.time}<br>
-            Duration: ${med.days} days
-        `;
-        list.appendChild(div);
-    });
 }
 
 // ===== NOTIFICATIONS =====
 async function loadNotifications() {
     const list = document.getElementById('notificationsList');
-    list.innerHTML = '';
+    list.innerHTML = '<p>Loading notifications...</p>';
     
-    // Try backend
-    const data = await apiRequest('/notifications');
-    if (data && data.success) {
-        data.notifications.forEach(notif => {
+    try {
+        const querySnapshot = await db.collection('notifications').orderBy('createdAt', 'desc').get();
+        list.innerHTML = '';
+        
+        querySnapshot.forEach((doc) => {
+            const notif = doc.data();
             const div = document.createElement('div');
-            div.className = `alert ${notif.type} show`;
-            div.innerHTML = `<strong>${new Date(notif.timestamp).toLocaleTimeString()}</strong> - ${notif.message}`;
+            div.className = `alert ${notif.type || 'info'} show`;
+            div.innerHTML = `<strong>${notif.timestamp ? new Date(notif.timestamp.seconds * 1000).toLocaleTimeString() : ''}</strong> - ${notif.message}`;
             list.appendChild(div);
         });
-        return;
+    } catch (error) {
+        list.innerHTML = '<p>No notifications</p>';
+        console.error('Error loading notifications:', error);
     }
-    
-    // Fallback
-    database.notifications.forEach(notif => {
-        const div = document.createElement('div');
-        div.className = `alert ${notif.type} show`;
-        div.innerHTML = `<strong>${notif.time}</strong> - ${notif.message}`;
-        list.appendChild(div);
-    });
 }
 
 // ===== EMERGENCY ALERTS =====
@@ -451,84 +321,56 @@ async function triggerEmergency() {
         return;
     }
     
-    // Try backend
-    const data = await apiRequest('/emergency', 'POST', { patient, type, details });
-    if (data && data.success) {
+    try {
+        await db.collection('emergencies').add({
+            patient,
+            type,
+            details,
+            status: 'ACTIVE',
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Add notification
+        await db.collection('notifications').add({
+            message: `🚨 EMERGENCY: ${type} for patient ${patient}`,
+            type: 'danger',
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
         document.getElementById('emergencyPatient').value = '';
         document.getElementById('emergencyType').value = '';
         document.getElementById('emergencyDetails').value = '';
         
-        showAlert("🚨 EMERGENCY ALERT TRIGGERED AND SENT TO ALL DOCTORS!", 'danger');
+        showAlert("🚨 EMERGENCY ALERT TRIGGERED!", 'danger');
         await loadEmergencyLog();
-        return;
+    } catch (error) {
+        showAlert("Error triggering emergency: " + error.message, 'danger');
     }
-    
-    // Fallback
-    const emergency = {
-        id: Date.now(),
-        patient,
-        type,
-        details,
-        timestamp: new Date().toLocaleString(),
-        status: "ACTIVE"
-    };
-    
-    database.emergencyAlerts.push(emergency);
-    database.notifications.unshift({
-        id: Date.now(),
-        type: 'danger',
-        message: `🚨 EMERGENCY: ${type} for patient ${patient}`,
-        time: new Date().toLocaleTimeString()
-    });
-    
-    document.getElementById('emergencyPatient').value = '';
-    document.getElementById('emergencyType').value = '';
-    document.getElementById('emergencyDetails').value = '';
-    
-    showAlert("🚨 EMERGENCY ALERT TRIGGERED (Demo Mode)!", 'danger');
-    loadEmergencyLog();
 }
 
 async function loadEmergencyLog() {
     const log = document.getElementById('emergencyLog');
+    log.innerHTML = '<h3>Emergency Log</h3><p>Loading...</p>';
     
-    // Try backend
-    const data = await apiRequest('/emergency');
-    if (data && data.success) {
+    try {
+        const querySnapshot = await db.collection('emergencies').orderBy('timestamp', 'desc').get();
         log.innerHTML = '<h3>Emergency Log</h3>';
-        if (data.emergencyAlerts.length === 0) {
-            log.innerHTML += '<p>No emergency alerts</p>';
-            return;
-        }
-        data.emergencyAlerts.forEach(alert => {
+        
+        querySnapshot.forEach((doc) => {
+            const alert = doc.data();
             const div = document.createElement('div');
             div.className = 'alert danger show';
             div.innerHTML = `
-                <strong>${new Date(alert.timestamp).toLocaleString()}</strong><br>
+                <strong>${alert.timestamp ? new Date(alert.timestamp.seconds * 1000).toLocaleString() : ''}</strong><br>
                 Type: ${alert.type} | Patient: ${alert.patient}<br>
                 Details: ${alert.details}
             `;
             log.appendChild(div);
         });
-        return;
+    } catch (error) {
+        log.innerHTML = '<h3>Emergency Log</h3><p>No emergency alerts</p>';
+        console.error('Error loading emergencies:', error);
     }
-    
-    // Fallback
-    log.innerHTML = '<h3>Emergency Log</h3>';
-    if (database.emergencyAlerts.length === 0) {
-        log.innerHTML += '<p>No emergency alerts</p>';
-        return;
-    }
-    database.emergencyAlerts.forEach(alert => {
-        const div = document.createElement('div');
-        div.className = 'alert danger show';
-        div.innerHTML = `
-            <strong>${alert.timestamp}</strong><br>
-            Type: ${alert.type} | Patient: ${alert.patient}<br>
-            Details: ${alert.details}
-        `;
-        log.appendChild(div);
-    });
 }
 
 // ===== GRAPHS =====
@@ -546,7 +388,6 @@ function drawBPChart() {
     const height = canvas.height;
     
     ctx.clearRect(0, 0, width, height);
-    
     ctx.strokeStyle = '#999';
     ctx.beginPath();
     ctx.moveTo(30, 10);
@@ -561,7 +402,6 @@ function drawBPChart() {
     data.forEach((value, index) => {
         const x = 50 + (index * (width - 80) / (data.length - 1));
         const y = height - 40 - (value - 110) * 1.5;
-        
         if (index === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
     });
@@ -593,7 +433,6 @@ function drawHRChart() {
     data.forEach((value, index) => {
         const x = 50 + (index * (width - 80) / (data.length - 1));
         const y = height - 40 - (value - 60) * 2;
-        
         if (index === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
     });
@@ -609,6 +448,36 @@ function drawHRChart() {
     });
 }
 
+// ===== FORMS =====
+function submitForm() {
+    const name = document.getElementById('formName').value;
+    const symptoms = document.getElementById('formSymptoms').value;
+    const diagnosis = document.getElementById('formDiagnosis').value;
+    const notes = document.getElementById('formNotes').value;
+    
+    if (!name || !symptoms || !diagnosis) {
+        showAlert("Please fill all required fields", 'danger');
+        return;
+    }
+    
+    db.collection('forms').add({
+        patient: name,
+        symptoms,
+        diagnosis,
+        notes,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    }).then(() => {
+        showAlert("Form submitted successfully!", 'success');
+        
+        document.getElementById('formName').value = '';
+        document.getElementById('formSymptoms').value = '';
+        document.getElementById('formDiagnosis').value = '';
+        document.getElementById('formNotes').value = '';
+    }).catch((error) => {
+        showAlert("Error submitting form: " + error.message, 'danger');
+    });
+}
+
 // ===== ALERT SYSTEM =====
 function showAlert(message, type) {
     const alertDiv = document.getElementById('alert');
@@ -620,50 +489,20 @@ function showAlert(message, type) {
     }, 3000);
 }
 
-// ===== WEBSOCKET =====
-function connectWebSocket() {
-    if (socket) return; // already connected
-    try {
-        socket = io('http://localhost:3000');
-        
-        socket.on('emergency-alert', (data) => {
-            showAlert(data.message, 'danger');
-            // Add to notifications
-            database.notifications.unshift({
-                id: Date.now(),
-                type: 'danger',
-                message: data.message,
-                time: data.time
-            });
-            loadNotifications();
-        });
-        
-        socket.on('connect', () => {
-            console.log('WebSocket connected');
-        });
-    } catch (error) {
-        console.error('WebSocket not available:', error);
-    }
-}
-
 // ===== INITIALIZATION =====
 window.addEventListener('load', async () => {
+    auth.onAuthStateChanged(async (user) => {
+        if (user) {
+            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('dashboardPage').style.display = 'block';
+            await loadDashboard();
+        }
+    });
+    
     const isLoggedIn = localStorage.getItem('isLoggedIn');
-    if (isLoggedIn === 'true') {
+    if (isLoggedIn === 'true' && !auth.currentUser) {
         document.getElementById('loginPage').style.display = 'none';
         document.getElementById('dashboardPage').style.display = 'block';
-        
-        // Try to load from backend
-        const patientsData = await apiRequest('/patients');
-        if (patientsData && patientsData.success) {
-            // Backend connected
-            await loadDashboard();
-            connectWebSocket();
-        } else {
-            // Fallback to demo
-            initializeDatabase();
-            loadDashboard();
-            updateStats();
-        }
+        loadDashboard();
     }
 });
