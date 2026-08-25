@@ -31,15 +31,29 @@
         .login-box {
             position: relative;
             overflow: hidden;
-            background: rgba(255, 255, 255, 0.12);
-            backdrop-filter: blur(22px);
-            -webkit-backdrop-filter: blur(22px);
-            border: 1px solid rgba(255, 255, 255, 0.22);
-            padding: 40px;
-            border-radius: 28px;
-            box-shadow: 0 24px 80px rgba(15, 23, 42, 0.35);
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.20), rgba(255,255,255,0.08)),
+                rgba(255, 255, 255, 0.10);
+            backdrop-filter: blur(26px);
+            -webkit-backdrop-filter: blur(26px);
+            border: 1px solid rgba(255, 255, 255, 0.28);
+            padding: 42px;
+            border-radius: 30px;
+            box-shadow:
+                0 30px 90px rgba(15, 23, 42, 0.42),
+                inset 0 1px 0 rgba(255, 255, 255, 0.28);
             width: 100%;
             max-width: 440px;
+        }
+
+        .login-box::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(circle at top left, rgba(255,255,255,0.28), transparent 26%),
+                radial-gradient(circle at bottom right, rgba(255,255,255,0.10), transparent 22%);
+            pointer-events: none;
         }
 
         .login-box h1 {
@@ -48,6 +62,7 @@
             margin-bottom: 30px;
             font-size: 30px;
             letter-spacing: 0.2px;
+            text-shadow: 0 8px 20px rgba(15, 23, 42, 0.25);
         }
 
         .auth-toggle {
@@ -99,7 +114,8 @@
 
         .form-group input:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: #8b5cf6;
+            box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.18);
         }
 
         .login-btn {
@@ -149,6 +165,27 @@
         .google-btn:hover {
             transform: translateY(-1px);
             box-shadow: 0 16px 30px rgba(15, 23, 42, 0.16);
+        }
+
+        #authHelpText {
+            text-align: center;
+            margin-top: 15px;
+            color: rgba(255,255,255,0.92);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .auth-note {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 999px;
+            margin-bottom: 12px;
+            background: rgba(255,255,255,0.14);
+            color: rgba(255,255,255,0.92);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
         }
 
         /* Dashboard */
@@ -366,6 +403,7 @@
 <!-- Login Page -->
 <div id="loginPage" class="login-container">
     <div class="login-box">
+        <div class="auth-note">Secure access</div>
         <h1>🏥 Every Life Matters</h1>
         <div class="auth-toggle">
             <button type="button" id="signUpTab" class="active" onclick="setAuthMode('signup')">Sign Up</button>
@@ -393,7 +431,7 @@
             </svg>
             Continue with Google
         </button>
-        <p id="authHelpText" style="text-align: center; margin-top: 15px; color: #666; font-size: 12px;">
+        <p id="authHelpText">
             No uppercase or special-character rules. Use any password you like, but Firebase requires at least 6 characters.
         </p>
     </div>
