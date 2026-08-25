@@ -458,4 +458,97 @@ function drawBPChart() {
         const x = 50 + (index * (width - 80) / (data.length - 1));
         const y = height - 40 - (value - 110) * 1.5;
         ctx.beginPath();
-        ctx.arc(x, y, 3, 0, Math.PI * 
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fill();
+    });
+}
+
+function drawHRChart() {
+    const canvas = document.getElementById('hrChart');
+    const ctx = canvas.getContext('2d');
+    
+    const data = [72, 75, 78, 76, 80, 75, 73];
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    ctx.clearRect(0, 0, width, height);
+    
+    ctx.strokeStyle = '#ff6b6b';
+    ctx.beginPath();
+    
+    data.forEach((value, index) => {
+        const x = 50 + (index * (width - 80) / (data.length - 1));
+        const y = height - 40 - (value - 60) * 2;
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    
+    ctx.fillStyle = '#ff6b6b';
+    data.forEach((value, index) => {
+        const x = 50 + (index * (width - 80) / (data.length - 1));
+        const y = height - 40 - (value - 60) * 2;
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fill();
+    });
+}
+
+// ===== FORMS =====
+function submitForm() {
+    const name = document.getElementById('formName').value;
+    const symptoms = document.getElementById('formSymptoms').value;
+    const diagnosis = document.getElementById('formDiagnosis').value;
+    const notes = document.getElementById('formNotes').value;
+    
+    if (!name || !symptoms || !diagnosis) {
+        showAlert("Please fill all required fields", 'danger');
+        return;
+    }
+    
+    db.collection('forms').add({
+        patient: name,
+        symptoms,
+        diagnosis,
+        notes,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    }).then(() => {
+        showAlert("Form submitted successfully!", 'success');
+        
+        document.getElementById('formName').value = '';
+        document.getElementById('formSymptoms').value = '';
+        document.getElementById('formDiagnosis').value = '';
+        document.getElementById('formNotes').value = '';
+    }).catch((error) => {
+        showAlert("Error submitting form: " + error.message, 'danger');
+    });
+}
+
+// ===== ALERT SYSTEM =====
+function showAlert(message, type) {
+    const alertDiv = document.getElementById('alert');
+    alertDiv.textContent = message;
+    alertDiv.className = `alert ${type} show`;
+    
+    setTimeout(() => {
+        alertDiv.classList.remove('show');
+    }, 3000);
+}
+
+// ===== INITIALIZATION =====
+window.addEventListener('load', async () => {
+    auth.onAuthStateChanged(async (user) => {
+        if (user) {
+            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('dashboardPage').style.display = 'block';
+            await loadDashboard();
+        }
+    });
+    
+    const isLoggedIn = localStorage.getItem('isLoggedIn');
+    if (isLoggedIn === 'true' && !auth.currentUser) {
+        document.getElementById('loginPage').style.display = 'none';
+        document.getElementById('dashboardPage').style.display = 'block';
+        loadDashboard();
+    }
+});
