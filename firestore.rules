@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    match /patients/{patientId} {
+      allow read, create, update, delete: if isSignedIn();
+    }
+
+    match /medications/{medId} {
+      allow read, create, update, delete: if isSignedIn();
+    }
+
+    match /notifications/{notifId} {
+      allow read, create, update, delete: if isSignedIn();
+    }
+
+    match /emergencies/{emergencyId} {
+      allow read, create, update, delete: if isSignedIn();
+    }
+
+    match /forms/{formId} {
+      allow read, create, update, delete: if isSignedIn();
+    }
+
+    match /device_tokens/{userId} {
+      allow read, create, update, delete: if isSignedIn();
+    }
+  }
+}
