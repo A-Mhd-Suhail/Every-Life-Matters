@@ -4,29 +4,48 @@ service cloud.firestore {
     function isSignedIn() {
       return request.auth != null;
     }
+    
+    function isAdmin() {
+      return isSignedIn() && 
+        request.auth.token.admin == true;  // requires custom claims
+    }
 
+    // Patients - any signed-in user can create, only admin can delete
     match /patients/{patientId} {
-      allow read, create, update, delete: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isAdmin();
     }
 
+    // Medications - any signed-in user
     match /medications/{medId} {
-      allow read, create, update, delete: if isSignedIn();
+      allow read, create, update: if isSignedIn();
+      allow delete: if isAdmin();
     }
 
+    // Notifications - any signed-in user can read
     match /notifications/{notifId} {
-      allow read, create, update, delete: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
     }
 
+    // Emergencies - any signed-in user can trigger
     match /emergencies/{emergencyId} {
-      allow read, create, update, delete: if isSignedIn();
+      allow read, create, update: if isSignedIn();
+      allow delete: if isAdmin();
     }
 
+    // Forms - any signed-in user
     match /forms/{formId} {
-      allow read, create, update, delete: if isSignedIn();
+      allow read, create, update: if isSignedIn();
+      allow delete: if isAdmin();
     }
 
+    // Device tokens - only owner can manage
     match /device_tokens/{userId} {
-      allow read, create, update, delete: if isSignedIn();
+      allow read, create, update, delete: if isSignedIn() && request.auth.uid == userId;
     }
   }
 }
